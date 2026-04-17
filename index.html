@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>籃球戰術板 Pro - 語音一體化版</title>
+    <style>
+        :root { 
+            --panel: rgba(25, 25, 25, 0.98); 
+            --border: rgba(255,255,255,0.15); 
+            --accent-blue: #3182ce;
+            --accent-green: #38a169;
+            --accent-purple: #805ad5;
+            --accent-red: #e53e3e;
+            --accent-orange: #dd6b20;
+        }
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; height: 100vh; display: flex; flex-direction: column; font-family: -apple-system, sans-serif; color: white; }
+        
+        .mode-tabs { display: flex; background: #1a202c; border-bottom: 1px solid var(--border); z-index: 5000; }
+        .mode-tab { flex: 1; padding: 12px; text-align: center; cursor: pointer; font-weight: bold; color: #718096; }
+        .mode-tab.active { color: white; border-bottom: 3px solid var(--accent-blue); background: rgba(255,255,255,0.1); }
+
+        .stage { flex: 1; display: flex; justify-content: center; align-items: center; position: relative; overflow: hidden; background: #111; }
+        .canvas-container { position: relative; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; }
+        canvas { position: absolute; touch-action: none; }
+        #court { z-index: 5; }
+        #drawingCanvas { z-index: 10; pointer-events: none; }
+        #drawingCanvas.active { pointer-events: auto; cursor: crosshair; }
+        
+        /* 核心修正：一體化語音面板 */
+        .voice-control-panel {
+            position: absolute; min-width: 180px; max-width: 300px; height: 54px;
+            background: rgba(45, 55, 72, 0.95); border-radius: 27px;
+            display: flex; align-items: center; padding: 0 5px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); z-index: 15000;
+            cursor: move; touch-action: none; border: 2px solid var(--border);
+            transition: background 0.3s, border-color 0.3s;
+        }
+        .voice-mic-icon {
+            width: 44px; height: 44px; background: var(--accent-purple);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 20px; flex-shrink: 0; transition: 0.3s;
+        }
+        .voice-text-area {
+            flex: 1; padding: 0 15px; font-size: 14px; color: #edf2f7;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            pointer-events: none;
+        }
+        .recording .voice-mic-icon { background: var(--accent-red); animation: voice-pulse 1.2s infinite; }
+        .recording { border-color: var(--accent-red); background: rgba(100, 30, 30, 0.95); }
+
+        @keyframes voice-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        .sidebar { position: absolute; top: 0; height: 100%; background: var(--panel); transition: 0.3s ease; z-index: 4000; width: 260px; display: flex; flex-direction: column; }
+        .sidebar-left { left: -260px; border-right: 1px solid var(--border); }
+        .sidebar-right { right: -260px; border-left: 1px solid var(--border); }
+        .sidebar.active { transform: translateX(0); }
+        .sidebar-left.active { left: 0; }
+        .sidebar-right.active { right: 0; }
+        .sidebar-content { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .tab { position: absolute; width: 42px; height: 100px; display: flex; align-items: center; justify-content: center; writing-mode: vertical-lr; cursor: pointer; color: white; font-weight: bold; top: 20%; z-index: 4001; }
+        .left-tab { right: -42px; background: var(--accent-blue); border-radius: 0 10px 10px 0; }
+        .right-tab { left: -42px; background: var(--accent-green); border-radius: 10px 0 0 10px; }
+
+        .panel-btn { width: 100%; padding: 10px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; font-size: 13px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .btn-green { background: var(--accent-green); }
+        .btn-blue { background: var(--accent-blue); }
+        .btn-gray { background: #4a5568; }
+        .btn-red { background: var(--accent-red); }
+        .btn-purple { background: var(--accent-purple); }
+        .btn-orange { background: var(--accent-orange); }
+        .tool-active { outline: 2px solid white; background: var(--accent-purple) !important; }
+        .btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+        .play-controls-wrapper { 
+            position: absolute; bottom: -250px; left: 50%; transform: translateX(-50%); z-index: 10000; 
+            display: flex; flex-direction: column; align-items: center; gap: 12px; transition: bottom 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+        }
+        .play-controls-wrapper.active { bottom: 30px; }
+        .speed-panel { background: rgba(0, 0, 0, 0.85); padding: 8px 20px; border-radius: 30px; display: flex; align-items: center; gap: 12px; font-size: 14px; border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        .speed-slider { cursor: pointer; accent-color: #3182ce; width: 120px; }
+        .play-bar { background: rgba(0, 0, 0, 0.85); padding: 12px 25px; border-radius: 50px; display: flex; align-items: center; gap: 20px; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+        .ctrl-btn { border: none; border-radius: 50%; width: 50px; height: 50px; cursor: pointer; color: white; display: flex; align-items: center; justify-content: center; font-size: 20px; }
+
+        .tactic-item { background: rgba(255,255,255,0.05); padding: 10px; border-radius: 6px; border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .tactic-name { font-size: 13px; font-weight: bold; color: #e2e8f0; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body>
+
+<div class="mode-tabs">
+    <div class="mode-tab active" id="tab-basic" onclick="switchMode('basic')">基本模式</div>
+    <div class="mode-tab" id="tab-advanced" onclick="switchMode('advanced')">專業模式</div>
+</div>
+
+<div class="stage">
+    <div id="voicePanel" class="voice-control-panel" style="left: 20px; bottom: 100px;">
+        <div class="voice-mic-icon">🎙️</div>
+        <div id="voiceText" class="voice-text-area">點擊語音輸入...</div>
+    </div>
+
+    <div class="canvas-container" id="canvasHolder">
+        <canvas id="court"></canvas>
+        <canvas id="drawingCanvas"></canvas>
+    </div>
+    
+    <div class="play-controls-wrapper" id="playBarWrapper">
+        <div class="speed-panel">
+            <span>移動速度：</span>
+            <input type="range" class="speed-slider" id="speedCtrl" min="0.01" max="0.1" step="0.01" value="0.05" oninput="updateSpeedDisp()">
+            <span id="speedVal" style="width: 40px; color: #48bb78; font-family: monospace;">0.05</span>
+        </div>
+        <div class="play-bar">
+            <button class="ctrl-btn" style="background:#48bb78;" onclick="resumeAnim()">▶</button>
+            <button class="ctrl-btn" style="background:#ecc94b;" onclick="pauseAnim()">Ⅱ</button>
+            <button class="ctrl-btn" style="background:#f56565;" onclick="stopAnim()">■</button>
+        </div>
+    </div>
+
+    <div class="sidebar sidebar-left" id="sidebarL">
+        <div class="tab left-tab" onclick="toggleSidebar('L')">雲端戰術庫 ◀</div>
+        <div class="sidebar-content">
+            <div id="sync-status" style="font-size:11px; text-align:center; color:#718096; margin-bottom:10px;">讀取中...</div>
+            <div id="tacticList"></div>
+            <button class="panel-btn btn-gray" style="margin-top:auto;" onclick="fetchCloudData()">🔄 手動同步更新</button>
+        </div>
+    </div>
+
+    <div class="sidebar sidebar-right" id="sidebarR">
+        <div class="tab right-tab" onclick="toggleSidebar('R')">控制面板 ◀</div>
+        <div class="sidebar-content">
+            <button class="panel-btn btn-purple" onclick="toggleFullScreen()">📺 全螢幕切換</button>
+            <hr style="border:0; border-top:1px solid var(--border); margin: 5px 0;">
+            <button class="panel-btn btn-green" onclick="record()">📌 紀錄目前影格 (第<span id="fCount">0</span>格)</button>
+            <button class="panel-btn btn-orange" onclick="saveToLibrary()">☁️ 儲存至雲端</button>
+            <hr style="border:0; border-top:1px solid var(--border); margin: 2px 0;">
+            <div class="btn-row">
+                <button id="solidBtn" class="panel-btn btn-gray tool-active" onclick="setLineStyle('solid')">實線</button>
+                <button id="dashBtn" class="panel-btn btn-gray" onclick="setLineStyle('dashed')">虛線</button>
+            </div>
+            <div class="btn-row">
+                <button id="drawBtn" class="panel-btn btn-gray" onclick="toggleDrawMode()">🖌️ 畫線開關</button>
+                <button class="panel-btn btn-red" onclick="clearDrawing()">🧹 清除畫線</button>
+            </div>
+            <hr style="border:0; border-top:1px solid var(--border); margin: 2px 0;">
+            <button class="panel-btn btn-blue" onclick="startPlay()">🎬 開始播放動畫</button>
+            <button class="panel-btn btn-gray" onclick="resetItems()">🔄 重置球員位置</button>
+            <button class="panel-btn btn-red" onclick="clearFrames()">🗑️ 清空所有影格</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const BIN_ID = '69e17b3baaba882197097667'; 
+    const MASTER_KEY = '$2a$10$D.kNv5pV5t13GOeW6jkHpORIoV7MloAwQrAPddT7WQaC9kd9VwRde';
+
+    const canvas = document.getElementById('court');
+    const ctx = canvas.getContext('2d');
+    const dCanvas = document.getElementById('drawingCanvas');
+    const dCtx = dCanvas.getContext('2d');
+    const BASE_W = 1000, BASE_H = 572;
+    
+    let players = [], slots = [], ball = {x:500, y:286};
+    let frames = [], playerImages = [], courtImg = null;
+    let isPlaying = false, isPaused = false, isWaiting = false;
+    let currentFrameIdx = 0, t = 0;
+    let isDrawingMode = false, isDrawing = false;
+    let currentMode = 'basic', lineStyle = 'solid';
+    let moveSpeed = 0.05; 
+    let pauseTime = 500; 
+    let savedTactics = [];
+
+    // --- 修改後的語音一體化與拖曳邏輯 ---
+    let recognition;
+    let isRecording = false;
+
+    function initSpeech() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) return;
+        recognition = new SpeechRecognition();
+        recognition.lang = 'zh-TW'; recognition.continuous = false; recognition.interimResults = false;
+        
+        recognition.onstart = () => {
+            isRecording = true;
+            document.getElementById('voicePanel').classList.add('recording');
+            document.getElementById('voiceText').innerText = "請說話...";
+        };
+
+        recognition.onresult = (e) => {
+            const text = e.results[0][0].transcript;
+            document.getElementById('voiceText').innerText = text;
+        };
+
+        recognition.onend = () => {
+            isRecording = false;
+            document.getElementById('voicePanel').classList.remove('recording');
+            if(document.getElementById('voiceText').innerText === "請說話...") {
+                document.getElementById('voiceText').innerText = "點擊語音輸入...";
+            }
+        };
+    }
+
+    function toggleSpeech() {
+        if (!recognition) return alert("您的瀏覽器不支援語音輸入");
+        if (isRecording) { recognition.stop(); } 
+        else { recognition.start(); }
+    }
+
+    function setupVoicePanel() {
+        const panel = document.getElementById('voicePanel');
+        let x = 0, y = 0, isDragging = false, hasMoved = false;
+
+        const start = (e) => { 
+            const pos = e.touches ? e.touches[0] : e;
+            x = pos.clientX - panel.offsetLeft;
+            y = pos.clientY - panel.offsetTop;
+            isDragging = true;
+            hasMoved = false;
+        };
+
+        const move = (e) => {
+            if (!isDragging) return;
+            hasMoved = true;
+            const pos = e.touches ? e.touches[0] : e;
+            panel.style.left = (pos.clientX - x) + 'px';
+            panel.style.top = (pos.clientY - y) + 'px';
+            panel.style.bottom = 'auto'; // 解除初始底部定位
+        };
+
+        const end = () => { isDragging = false; };
+
+        panel.addEventListener('mousedown', start);
+        panel.addEventListener('touchstart', start, {passive:false});
+        window.addEventListener('mousemove', move);
+        window.addEventListener('touchmove', move, {passive:false});
+        window.addEventListener('mouseup', end);
+        window.addEventListener('touchend', end);
+
+        panel.addEventListener('click', () => {
+            if (!hasMoved) toggleSpeech();
+        });
+    }
+
+    // --- 核心戰術板邏輯 ---
+    async function init() {
+        try {
+            courtImg = await loadImage("https://raw.githubusercontent.com/goodskyfly-cell/BBOARD/main/basketball%20court%202%20(NEW).png");
+            const names = ["01.png", "05.png", "06.png", "07.png", "08.png", "09.png", "10.png", "12.png", "13.png", "15.png", "23.png", "89.png"];
+            playerImages = await Promise.all(names.map(n => loadImage(`https://raw.githubusercontent.com/goodskyfly-cell/newboard/main/${n}`)));
+            window.addEventListener('resize', resize);
+            resize(); resetItems(); setupEvents(); await fetchCloudData();
+            initSpeech(); setupVoicePanel();
+        } catch (e) { console.error(e); }
+    }
+
+    function loadImage(src) { return new Promise((res) => { const img = new Image(); img.crossOrigin = "anonymous"; img.src = src; img.onload = () => res(img); }); }
+
+    function resize() {
+        const holder = document.getElementById('canvasHolder');
+        const ratio = BASE_W / BASE_H;
+        let w = holder.clientWidth, h = holder.clientHeight;
+        if (w / h > ratio) w = h * ratio; else h = w / ratio;
+        canvas.width = dCanvas.width = w; canvas.height = dCanvas.height = h;
+        render();
+    }
+
+    function resetItems() {
+        players = []; 
+        for (let i = 0; i < 12; i++) players.push({ x: 80 + (i % 6) * 110, y: i < 6 ? 90 : 200, imgIndex: i, bindSlot: null });
+        slots = [ {x: 300, y: 480, id: 0}, {x: 400, y: 480, id: 1}, {x: 500, y: 480, id: 2}, {x: 600, y: 480, id: 3}, {x: 700, y: 480, id: 4} ];
+        ball = {x: 500, y: 286}; render();
+    }
+
+    function render() {
+        if (!courtImg) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(courtImg, 0, 0, canvas.width, canvas.height);
+        const s = canvas.width / BASE_W;
+        if (currentMode === 'advanced' || isPlaying) {
+            slots.forEach(sl => {
+                ctx.beginPath(); ctx.arc(sl.x * s, sl.y * s, 30 * s, 0, Math.PI * 2);
+                ctx.strokeStyle = "rgba(49, 130, 206, 0.8)"; ctx.setLineDash([5, 5]); ctx.lineWidth = 3; ctx.stroke();
+                ctx.setLineDash([]); ctx.fillStyle = "rgba(49, 130, 206, 0.15)"; ctx.fill();
+            });
+        }
+        players.forEach(p => {
+            const r = 25.5 * s;
+            ctx.save(); ctx.beginPath(); ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2); ctx.clip();
+            if (playerImages[p.imgIndex]) ctx.drawImage(playerImages[p.imgIndex], (p.x-25.5)*s, (p.y-25.5)*s, 51*s, 51*s);
+            ctx.restore(); ctx.beginPath(); ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2);
+            ctx.strokeStyle = (p.bindSlot !== null && currentMode === 'advanced') ? "#38a169" : "white";
+            ctx.lineWidth = 2.5; ctx.stroke();
+        });
+        const br = 18 * s; ctx.beginPath(); ctx.arc(ball.x * s, ball.y * s, br, 0, Math.PI * 2);
+        ctx.fillStyle = "#ff5722"; ctx.fill(); ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    function setupEvents() {
+        let target = null;
+        const getXY = (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const cx = e.touches ? e.touches[0].clientX : e.clientX;
+            const cy = e.touches ? e.touches[0].clientY : e.clientY;
+            const s = canvas.width / BASE_W; return { x: (cx - rect.left) / s, y: (cy - rect.top) / s };
+        };
+        const start = (e) => {
+            if (isPlaying) return;
+            const pos = getXY(e);
+            if (isDrawingMode) {
+                const s = canvas.width / BASE_W; dCtx.beginPath(); dCtx.moveTo(pos.x * s, pos.y * s);
+                dCtx.setLineDash(lineStyle === 'dashed' ? [10, 10] : []);
+                dCtx.strokeStyle = "black"; dCtx.lineWidth = 4; isDrawing = true; return;
+            }
+            const items = currentMode === 'advanced' ? [...slots, ball, ...players] : [ball, ...players];
+            target = items.reverse().find(it => Math.hypot(it.x - pos.x, it.y - pos.y) < 30);
+        };
+        const move = (e) => {
+            if (!target && !isDrawing) return; if (e.cancelable) e.preventDefault();
+            const pos = getXY(e);
+            if (isDrawingMode) { const s = canvas.width / BASE_W; dCtx.lineTo(pos.x * s, pos.y * s); dCtx.stroke(); }
+            else { 
+                target.x = pos.x; target.y = pos.y; 
+                if (currentMode === 'advanced' && players.includes(target)) {
+                    const near = slots.find(sl => Math.hypot(sl.x - pos.x, i.y - pos.y) < 40); // 修正 i.y 為 pos.y
+                    target.bindSlot = near ? near.id : null;
+                    if(near) { target.x = near.x; target.y = near.y; }
+                }
+                render(); 
+            }
+        };
+        const end = () => { target = null; isDrawing = false; };
+        const el = document.getElementById('canvasHolder');
+        el.addEventListener('mousedown', start); window.addEventListener('mousemove', move); window.addEventListener('mouseup', end);
+        el.addEventListener('touchstart', start, {passive:false}); window.addEventListener('touchmove', move, {passive:false}); window.addEventListener('touchend', end);
+    }
+
+    function record() {
+        frames.push({ players: JSON.parse(JSON.stringify(players)), ball: JSON.parse(JSON.stringify(ball)), slots: JSON.parse(JSON.stringify(slots)), drawing: dCanvas.toDataURL() });
+        document.getElementById('fCount').innerText = frames.length;
+        clearDrawing(); alert(`已紀錄影格 ${frames.length}`);
+    }
+
+    function animate() {
+        if (!isPlaying || isPaused || isWaiting) return;
+        const cur = frames[currentFrameIdx], nxt = frames[currentFrameIdx + 1];
+        if (t > 0) clearDrawing(); 
+        else if (t === 0 && cur.drawing) drawSavedLine(cur.drawing);
+
+        if (nxt) {
+            slots.forEach((sl, i) => { sl.x = cur.slots[i].x + (nxt.slots[i].x - cur.slots[i].x) * t; sl.y = cur.slots[i].y + (nxt.slots[i].y - cur.slots[i].y) * t; });
+            players.forEach((p, i) => {
+                if (p.bindSlot !== null) {
+                    const targetSlot = slots.find(s => s.id === p.bindSlot);
+                    p.x = targetSlot.x; p.y = targetSlot.y;
+                } else {
+                    p.x = cur.players[i].x + (nxt.players[i].x - cur.players[i].x) * t;
+                    p.y = cur.players[i].y + (nxt.players[i].y - cur.players[i].y) * t;
+                }
+            });
+            ball.x = cur.ball.x + (nxt.ball.x - cur.ball.x) * t; ball.y = cur.ball.y + (nxt.ball.y - cur.ball.y) * t;
+            t += moveSpeed; render();
+            if (t >= 1) { 
+                t = 0; currentFrameIdx++; isWaiting = true; 
+                if (frames[currentFrameIdx] && frames[currentFrameIdx].drawing) drawSavedLine(frames[currentFrameIdx].drawing);
+                setTimeout(() => { isWaiting = false; animate(); }, pauseTime); 
+            } 
+            else { requestAnimationFrame(animate); }
+        } else { isPlaying = false; }
+    }
+
+    function startPlay() {
+        if (frames.length < 2) return alert("請先記錄影格！");
+        isPlaying = true; isPaused = false; currentFrameIdx = 0; t = 0;
+        document.getElementById('playBarWrapper').classList.add('active');
+        animate();
+    }
+
+    function stopAnim() { isPlaying = false; document.getElementById('playBarWrapper').classList.remove('active'); resetItems(); clearDrawing(); }
+    function pauseAnim() { isPaused = !isPaused; if (!isPaused && isPlaying) animate(); }
+    function resumeAnim() { if (!isPlaying) startPlay(); else { isPaused = false; animate(); } }
+    function updateSpeedDisp() { moveSpeed = parseFloat(document.getElementById('speedCtrl').value); document.getElementById('speedVal').innerText = moveSpeed.toFixed(2); }
+    function drawSavedLine(url) { const img = new Image(); img.src = url; img.onload = () => { clearDrawing(); dCtx.drawImage(img, 0, 0, dCanvas.width, dCanvas.height); }; }
+    function toggleSidebar(dir) { document.getElementById('sidebar' + dir).classList.toggle('active'); }
+    function setLineStyle(s) { lineStyle = s; document.getElementById('solidBtn').classList.toggle('tool-active', s==='solid'); document.getElementById('dashBtn').classList.toggle('tool-active', s==='dashed'); }
+    function toggleDrawMode() { isDrawingMode = !isDrawingMode; document.getElementById('drawBtn').classList.toggle('tool-active', isDrawingMode); dCanvas.classList.toggle('active', isDrawingMode); }
+    function clearDrawing() { dCtx.clearRect(0,0,dCanvas.width,dCanvas.height); }
+    function clearFrames() { frames = []; document.getElementById('fCount').innerText = "0"; stopAnim(); }
+    function toggleFullScreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
+    function switchMode(m) { currentMode = m; document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active')); document.getElementById(m === 'basic' ? 'tab-basic' : 'tab-advanced').classList.add('active'); resetItems(); }
+
+    async function fetchCloudData() {
+        const s = document.getElementById('sync-status'); s.innerText = "⏳ 同步中...";
+        try {
+            const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': MASTER_KEY } });
+            const result = await res.json();
+            savedTactics = result.record.tactics || []; updateTacticList(); s.innerText = "✅ 已同步";
+        } catch (e) { s.innerText = "❌ 失敗"; }
+    }
+
+    function updateTacticList() {
+        const list = document.getElementById('tacticList'); list.innerHTML = "";
+        savedTactics.forEach((t, i) => {
+            const item = document.createElement('div'); item.className = 'tactic-item';
+            item.innerHTML = `<span class="tactic-name">${t.name}</span><div class="tactic-btns"><button class="panel-btn btn-blue" style="padding:4px; width:45px;" onclick="loadTactic(${i})">載入</button><button class="panel-btn btn-red" style="padding:4px; width:45px;" onclick="deleteTactic(${i})">刪除</button></div>`;
+            list.appendChild(item);
+        });
+    }
+
+    function loadTactic(idx) { 
+        const t_data = savedTactics[idx].data; frames = JSON.parse(JSON.stringify(t_data)); 
+        document.getElementById('fCount').innerText = frames.length; 
+        players = JSON.parse(JSON.stringify(frames[0].players)); ball = JSON.parse(JSON.stringify(frames[0].ball)); slots = JSON.parse(JSON.stringify(frames[0].slots)); 
+        currentFrameIdx = 0; t = 0; clearDrawing(); render(); 
+    }
+
+    async function saveToLibrary() { 
+        const n = prompt("戰術名稱："); if(!n) return;
+        savedTactics.push({ name:n, data:JSON.parse(JSON.stringify(frames)) });
+        updateTacticList();
+        try {
+            await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY }, body: JSON.stringify({ tactics: savedTactics }) });
+            alert("已儲存至雲端"); clearFrames();
+        } catch(e) { alert("儲存失敗"); }
+    }
+
+    init();
+</script>
+</body>
+</html>
