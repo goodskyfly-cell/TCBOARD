@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - 精確磁吸版</title>
+    <title>籃球戰術板 Pro - 全螢幕優化版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -27,6 +27,15 @@
         #drawingCanvas { z-index: 10; pointer-events: none; }
         #drawingCanvas.active { pointer-events: auto; cursor: crosshair; }
         
+        /* 修正：自定義通知 (取代 alert 以維持全螢幕) */
+        #toast {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            background: var(--accent-blue); color: white; padding: 10px 25px;
+            border-radius: 25px; font-weight: bold; z-index: 20000;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
         /* 語音面板視覺 */
         .voice-control-panel {
             position: absolute; min-width: 220px; max-width: 400px; height: 66px;
@@ -80,6 +89,8 @@
     </style>
 </head>
 <body>
+
+<div id="toast">已紀錄影格</div>
 
 <div class="mode-tabs">
     <div class="mode-tab active" id="tab-basic" onclick="switchMode('basic')">基本模式</div>
@@ -161,7 +172,7 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 語音優化邏輯 ---
+    // --- 語音辨識邏輯 ---
     let recognition;
     let isRecording = false;
 
@@ -211,7 +222,28 @@
         window.addEventListener('mouseup', end); window.addEventListener('touchend', end);
     }
 
-    // --- 核心戰術板邏輯 ---
+    // --- 核心修正：紀錄影格與通知邏輯 ---
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.style.opacity = '1';
+        setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+    }
+
+    function record() {
+        frames.push({ 
+            players: JSON.parse(JSON.stringify(players)), 
+            ball: JSON.parse(JSON.stringify(ball)), 
+            slots: JSON.parse(JSON.stringify(slots)), 
+            drawing: dCanvas.toDataURL() 
+        });
+        document.getElementById('fCount').innerText = frames.length;
+        clearDrawing();
+        // 修正：使用自定義通知取代 alert，避免跳出全螢幕
+        showToast(`已紀錄第 ${frames.length} 格影格`);
+    }
+
+    // --- 其餘戰術板邏輯保留 ---
     async function init() {
         try {
             courtImg = await loadImage("https://raw.githubusercontent.com/goodskyfly-cell/BBOARD/main/basketball%20court%202%20(NEW).png");
@@ -243,16 +275,9 @@
             if (isDrawingMode) { dCtx.lineTo(pos.x * (canvas.width/BASE_W), pos.y * (canvas.width/BASE_W)); dCtx.stroke(); } 
             else { 
                 target.x = pos.x; target.y = pos.y; 
-                // 修正：磁吸範圍判定優化
                 if (currentMode === 'advanced' && players.includes(target)) {
-                    // 只有在距離藍圈中心 35px 以內才會磁吸
                     const near = slots.find(sl => Math.hypot(sl.x - pos.x, sl.y - pos.y) < 35);
-                    if(near) {
-                        target.bindSlot = near.id;
-                        target.x = near.x; target.y = near.y;
-                    } else {
-                        target.bindSlot = null;
-                    }
+                    if(near) { target.bindSlot = near.id; target.x = near.x; target.y = near.y; } else { target.bindSlot = null; }
                 }
                 render(); 
             }
@@ -261,8 +286,6 @@
         const el = document.getElementById('canvasHolder'); el.addEventListener('mousedown', start); window.addEventListener('mousemove', move); window.addEventListener('mouseup', end); el.addEventListener('touchstart', start, {passive:false}); window.addEventListener('touchmove', move, {passive:false}); window.addEventListener('touchend', end);
     }
 
-    // --- 其餘功能均保留 ---
-    function record() { frames.push({ players: JSON.parse(JSON.stringify(players)), ball: JSON.parse(JSON.stringify(ball)), slots: JSON.parse(JSON.stringify(slots)), drawing: dCanvas.toDataURL() }); document.getElementById('fCount').innerText = frames.length; clearDrawing(); alert(`已紀錄影格 ${frames.length}`); }
     function animate() {
         if (!isPlaying || isPaused || isWaiting) return; const cur = frames[currentFrameIdx], nxt = frames[currentFrameIdx + 1]; if (t > 0) clearDrawing(); else if (t === 0 && cur.drawing) drawSavedLine(cur.drawing);
         if (nxt) {
@@ -288,7 +311,7 @@
     async function fetchCloudData() { const s = document.getElementById('sync-status'); s.innerText = "⏳ 同步中..."; try { const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': MASTER_KEY } }); const result = await res.json(); savedTactics = result.record.tactics || []; updateTacticList(); s.innerText = "✅ 已同步"; } catch (e) { s.innerText = "❌ 失敗"; } }
     function updateTacticList() { const list = document.getElementById('tacticList'); list.innerHTML = ""; savedTactics.forEach((t, i) => { const item = document.createElement('div'); item.className = 'tactic-item'; item.innerHTML = `<span class="tactic-name">${t.name}</span><div class="tactic-btns"><button class="panel-btn btn-blue" style="padding:4px; width:45px;" onclick="loadTactic(${i})">載入</button><button class="panel-btn btn-red" style="padding:4px; width:45px;" onclick="deleteTactic(${i})">刪除</button></div>`; list.appendChild(item); }); }
     function loadTactic(idx) { const t_data = savedTactics[idx].data; frames = JSON.parse(JSON.stringify(t_data)); document.getElementById('fCount').innerText = frames.length; players = JSON.parse(JSON.stringify(frames[0].players)); ball = JSON.parse(JSON.stringify(frames[0].ball)); slots = JSON.parse(JSON.stringify(frames[0].slots)); currentFrameIdx = 0; t = 0; clearDrawing(); render(); }
-    async function saveToLibrary() { const n = prompt("戰術名稱："); if(!n) return; savedTactics.push({ name:n, data:JSON.parse(JSON.stringify(frames)) }); updateTacticList(); try { await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY }, body: JSON.stringify({ tactics: savedTactics }) }); alert("已儲存至雲端"); clearFrames(); } catch(e) { alert("儲存失敗"); } }
+    async function saveToLibrary() { const n = prompt("戰術名稱："); if(!n) return; savedTactics.push({ name:n, data:JSON.parse(JSON.stringify(frames)) }); updateTacticList(); try { await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': MASTER_KEY }, body: JSON.stringify({ tactics: savedTactics }) }); showToast("已儲存至雲端"); clearFrames(); } catch(e) { showToast("儲存失敗"); } }
 
     init();
 </script>
