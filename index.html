@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - 語音修復加強版</title>
+    <title>籃球戰術板 Pro - 平板硬體優化版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -170,14 +170,14 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 加強型語音修復機制：徹底重置麥克風驅動 ---
+    // --- 平板強化語音模組 ---
     let recognition = null;
     let isRecording = false;
-    let isProcessing = false;
+    let debounceTimer = false;
 
     function initSpeech() {
-        // 先釋放舊的辨識物件
         if (recognition) {
+            recognition.onstart = recognition.onresult = recognition.onend = recognition.onerror = null;
             recognition.abort();
             recognition = null;
         }
@@ -192,9 +192,8 @@
         
         recognition.onstart = () => { 
             isRecording = true;
-            isProcessing = false;
             document.getElementById('voicePanel').classList.add('recording'); 
-            document.getElementById('voiceText').innerText = "辨識中..."; 
+            document.getElementById('voiceText').innerText = "請說話..."; 
         };
 
         recognition.onresult = (e) => {
@@ -207,49 +206,53 @@
 
         recognition.onend = () => { 
             isRecording = false;
-            isProcessing = false;
             document.getElementById('voicePanel').classList.remove('recording'); 
-            if(document.getElementById('voiceText').innerText === "辨識中...") {
+            if(document.getElementById('voiceText').innerText === "請說話...") {
                 document.getElementById('voiceText').innerText = "點擊語音輸入..."; 
             }
-            // 關鍵點：結束時徹底銷毀物件，確保下次能正常啟動
-            recognition = null;
         };
 
         recognition.onerror = (e) => { 
-            console.error("Speech error:", e.error);
+            console.warn("Speech error:", e.error);
             isRecording = false;
-            isProcessing = false;
             document.getElementById('voicePanel').classList.remove('recording'); 
+            if(e.error === 'not-allowed') alert("請確認平板已授權瀏覽器使用麥克風權限");
             recognition = null;
         };
     }
 
-    function toggleSpeech() {
-        if (isProcessing) return; // 防止重複點擊連發
-        isProcessing = true;
+    // 平板專用：啟動 WebAudio 脈衝以喚醒外接設備
+    function wakeUpAudio() {
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            const audioCtx = new AudioContext();
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0; // 靜音
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start(0);
+            oscillator.stop(0.1);
+        } catch(e) {}
+    }
 
-        if (isRecording && recognition) {
-            // 執行「結束」：強制銷毀
-            recognition.abort(); 
-            // 立即回饋視覺，不等待 onend
-            isRecording = false;
-            document.getElementById('voicePanel').classList.remove('recording');
-            document.getElementById('voiceText').innerText = "點擊語音輸入...";
-            setTimeout(() => { isProcessing = false; }, 300);
+    function toggleSpeech() {
+        if (debounceTimer) return;
+        debounceTimer = true;
+        setTimeout(() => { debounceTimer = false; }, 600);
+
+        if (isRecording) {
+            if (recognition) recognition.stop();
         } else {
-            // 執行「開始」：全新初始化
+            wakeUpAudio(); // 平板硬體喚醒
             initSpeech();
-            if (!recognition) {
-                isProcessing = false;
-                return alert("您的瀏覽器不支援語音輸入");
-            }
+            if (!recognition) return alert("您的瀏覽器不支援語音輸入");
             try {
                 recognition.start();
-                setTimeout(() => { isProcessing = false; }, 300);
             } catch(e) {
-                console.error(e);
-                isProcessing = false;
+                console.error("Start error:", e);
+                initSpeech();
+                recognition.start();
             }
         }
     }
@@ -270,7 +273,7 @@
             if (!isDragging) return;
             const pos = e.touches ? e.touches[0] : e;
             const dist = Math.hypot(pos.clientX - startX, pos.clientY - startY);
-            if (dist > 5) {
+            if (dist > 8) {
                 moved = true;
                 panel.style.left = (pos.clientX - offsetX) + 'px';
                 panel.style.top = (pos.clientY - offsetY) + 'px';
@@ -280,6 +283,7 @@
         const end = (e) => {
             if (isDragging) {
                 const duration = Date.now() - startTime;
+                // 如果沒移動且觸碰時間短，視為「開關」指令
                 if (!moved && duration < 350) {
                     toggleSpeech();
                 }
@@ -292,7 +296,7 @@
         window.addEventListener('mouseup', end); window.addEventListener('touchend', end);
     }
 
-    // --- 其餘功能均完整保留 ---
+    // --- 其餘功能保留 ---
     function showToast(msg) {
         const toast = document.getElementById('toast');
         toast.innerText = msg; toast.style.opacity = '1';
