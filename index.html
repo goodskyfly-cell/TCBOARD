@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - 平板硬體優化版</title>
+    <title>籃球戰術板 Pro - USB 硬體修正版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -170,10 +170,10 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 平板硬體優化語音模組 ---
+    // --- 強化版語音模組：解決 Micro-B 硬體偵測問題 ---
     let recognition = null;
     let isRecording = false;
-    let actionLock = false;
+    let hardwareLock = false;
 
     async function initSpeech() {
         if (recognition) {
@@ -181,12 +181,23 @@
             recognition = null;
         }
 
-        // 強制激發硬體通道 (針對平板 Chrome 無法自動選取外接設備的問題)
+        // 第一步：強制喚醒 USB 通道 (對 Micro-B 舊型介面尤為重要)
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            stream.getTracks().forEach(track => track.stop()); // 授權後釋放，交還給 WebSpeech
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
+            });
+            // 搜尋是否有 USB 外接設備
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const hasUSB = devices.some(d => d.kind === 'audioinput' && d.label.toLowerCase().includes('usb'));
+            console.log("USB Microphone Detected:", hasUSB);
+            
+            stream.getTracks().forEach(track => track.stop()); 
         } catch (e) {
-            alert("Chrome 拒絕存取麥克風，請點擊網址列左側圖示允許權限。");
+            alert("硬體偵測失敗，請確認 Micro-B 轉接頭是否緊實，並允許瀏覽器存取麥克風。");
             return;
         }
 
@@ -201,7 +212,7 @@
         recognition.onstart = () => { 
             isRecording = true;
             document.getElementById('voicePanel').classList.add('recording'); 
-            document.getElementById('voiceText').innerText = "辨識中..."; 
+            document.getElementById('voiceText').innerText = "連線中..."; 
         };
 
         recognition.onresult = (e) => {
@@ -212,78 +223,73 @@
             document.getElementById('voiceText').innerText = interimTranscript;
         };
 
-        recognition.onend = () => { shutDownVoiceUI(); };
-        recognition.onerror = (e) => { console.error(e); shutDownVoiceUI(); };
+        recognition.onend = () => { forceResetVoiceUI(); };
+        recognition.onerror = (e) => { 
+            console.warn("Speech Error:", e.error); 
+            forceResetVoiceUI(); 
+        };
     }
 
-    function shutDownVoiceUI() {
+    function forceResetVoiceUI() {
         isRecording = false;
-        document.getElementById('voicePanel').classList.remove('recording'); 
-        if(document.getElementById('voiceText').innerText === "辨識中...") {
-            document.getElementById('voiceText').innerText = "點擊語音輸入..."; 
+        const panel = document.getElementById('voicePanel');
+        const txt = document.getElementById('voiceText');
+        panel.classList.remove('recording'); 
+        if(txt.innerText === "連線中..." || txt.innerText === "辨識中...") {
+            txt.innerText = "點擊語音輸入..."; 
         }
         recognition = null;
     }
 
     async function toggleSpeech() {
-        if (actionLock) return;
-        actionLock = true;
-        setTimeout(() => { actionLock = false; }, 500);
+        if (hardwareLock) return;
+        hardwareLock = true;
+        setTimeout(() => { hardwareLock = false; }, 600);
 
         if (isRecording) {
             if (recognition) {
                 recognition.stop();
-                recognition.abort(); // 強制中止連線
+                recognition.abort(); 
             }
-            shutDownVoiceUI();
+            forceResetVoiceUI();
         } else {
             await initSpeech();
             if (!recognition) return;
             try {
                 recognition.start();
             } catch(e) {
-                shutDownVoiceUI();
+                forceResetVoiceUI();
             }
         }
     }
 
+    // --- 其餘功能均完整保留 ---
     function setupVoicePanel() {
         const panel = document.getElementById('voicePanel');
-        let startX = 0, startY = 0, offsetX = 0, offsetY = 0, startTime = 0;
-        let isDragging = false, moved = false;
-
+        let startX = 0, startY = 0, offsetX = 0, offsetY = 0, startTime = 0, isDragging = false, moved = false;
         const start = (e) => { 
             const pos = e.touches ? e.touches[0] : e;
             startX = pos.clientX; startY = pos.clientY;
             offsetX = pos.clientX - panel.offsetLeft; offsetY = pos.clientY - panel.offsetTop;
-            startTime = Date.now();
-            isDragging = true; moved = false;
+            startTime = Date.now(); isDragging = true; moved = false;
         };
         const move = (e) => {
             if (!isDragging) return;
             const pos = e.touches ? e.touches[0] : e;
-            const dist = Math.hypot(pos.clientX - startX, pos.clientY - startY);
-            if (dist > 10) {
-                moved = true;
-                panel.style.left = (pos.clientX - offsetX) + 'px';
-                panel.style.top = (pos.clientY - offsetY) + 'px';
-                panel.style.bottom = 'auto';
+            if (Math.hypot(pos.clientX - startX, pos.clientY - startY) > 10) {
+                moved = true; panel.style.left = (pos.clientX - offsetX) + 'px';
+                panel.style.top = (pos.clientY - offsetY) + 'px'; panel.style.bottom = 'auto';
             }
         };
-        const end = (e) => {
-            if (isDragging) {
-                const duration = Date.now() - startTime;
-                if (!moved && duration < 350) toggleSpeech();
-            }
+        const end = () => {
+            if (isDragging && !moved && (Date.now() - startTime < 350)) toggleSpeech();
             isDragging = false;
         };
-
         panel.addEventListener('mousedown', start); panel.addEventListener('touchstart', start, {passive:false});
         window.addEventListener('mousemove', move); window.addEventListener('touchmove', move, {passive:false});
         window.addEventListener('mouseup', end); window.addEventListener('touchend', end);
     }
 
-    // --- 其餘功能保留 ---
     function showToast(msg) {
         const toast = document.getElementById('toast');
         toast.innerText = msg; toast.style.opacity = '1';
