@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - USB 硬體修正版</title>
+    <title>籃球戰術板 Pro - USB 驅動修正版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -170,34 +170,35 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 強化版語音模組：解決 Micro-B 硬體偵測問題 ---
+    // --- 針對外接 USB 麥克風音訊焦點修正 ---
     let recognition = null;
     let isRecording = false;
     let hardwareLock = false;
+    let audioContext = null;
+    let audioStream = null;
 
     async function initSpeech() {
-        if (recognition) {
-            recognition.abort();
-            recognition = null;
-        }
+        if (recognition) { recognition.abort(); recognition = null; }
+        if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
 
-        // 第一步：強制喚醒 USB 通道 (對 Micro-B 舊型介面尤為重要)
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ 
+            // 強制請求最高優先權音訊，並關閉可能導致 USB 訊號被過濾的處理
+            audioStream = await navigator.mediaDevices.getUserMedia({ 
                 audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
+                    echoCancellation: false, 
+                    noiseSuppression: false, 
+                    autoGainControl: true 
                 } 
             });
-            // 搜尋是否有 USB 外接設備
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const hasUSB = devices.some(d => d.kind === 'audioinput' && d.label.toLowerCase().includes('usb'));
-            console.log("USB Microphone Detected:", hasUSB);
-            
-            stream.getTracks().forEach(track => track.stop()); 
+
+            // 啟動 AudioContext 保持 Micro-B 介面活躍
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioContext.createMediaStreamSource(audioStream);
+            const processor = audioContext.createAnalyser(); 
+            source.connect(processor); // 建立內部連接但不輸出聲音，維持硬體讀取狀態
+
         } catch (e) {
-            alert("硬體偵測失敗，請確認 Micro-B 轉接頭是否緊實，並允許瀏覽器存取麥克風。");
+            alert("偵測到麥克風但無法獲取訊號，請重新插拔轉接頭並確認已點擊允許權限。");
             return;
         }
 
@@ -224,46 +225,34 @@
         };
 
         recognition.onend = () => { forceResetVoiceUI(); };
-        recognition.onerror = (e) => { 
-            console.warn("Speech Error:", e.error); 
-            forceResetVoiceUI(); 
-        };
+        recognition.onerror = (e) => { forceResetVoiceUI(); };
     }
 
     function forceResetVoiceUI() {
         isRecording = false;
-        const panel = document.getElementById('voicePanel');
-        const txt = document.getElementById('voiceText');
-        panel.classList.remove('recording'); 
-        if(txt.innerText === "連線中..." || txt.innerText === "辨識中...") {
-            txt.innerText = "點擊語音輸入..."; 
-        }
+        if (audioStream) { audioStream.getTracks().forEach(t => t.stop()); audioStream = null; }
+        if (audioContext) { audioContext.close(); audioContext = null; }
+        document.getElementById('voicePanel').classList.remove('recording'); 
+        document.getElementById('voiceText').innerText = "點擊語音輸入..."; 
         recognition = null;
     }
 
     async function toggleSpeech() {
         if (hardwareLock) return;
         hardwareLock = true;
-        setTimeout(() => { hardwareLock = false; }, 600);
+        setTimeout(() => { hardwareLock = false; }, 800);
 
         if (isRecording) {
-            if (recognition) {
-                recognition.stop();
-                recognition.abort(); 
-            }
+            if (recognition) { recognition.stop(); recognition.abort(); }
             forceResetVoiceUI();
         } else {
             await initSpeech();
             if (!recognition) return;
-            try {
-                recognition.start();
-            } catch(e) {
-                forceResetVoiceUI();
-            }
+            try { recognition.start(); } catch(e) { forceResetVoiceUI(); }
         }
     }
 
-    // --- 其餘功能均完整保留 ---
+    // --- 其餘所有戰術板功能邏輯保留 ---
     function setupVoicePanel() {
         const panel = document.getElementById('voicePanel');
         let startX = 0, startY = 0, offsetX = 0, offsetY = 0, startTime = 0, isDragging = false, moved = false;
