@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - 語音修正版</title>
+    <title>籃球戰術板 Pro - 語音修復加強版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -58,7 +58,6 @@
 
         @keyframes voice-pulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
 
-        /* 側邊欄與按鈕樣式 */
         .sidebar { position: absolute; top: 0; height: 100%; background: var(--panel); transition: 0.3s ease; z-index: 4000; width: 260px; display: flex; flex-direction: column; }
         .sidebar-left { left: -260px; border-right: 1px solid var(--border); }
         .sidebar-right { right: -260px; border-left: 1px solid var(--border); }
@@ -171,59 +170,86 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 語音功能修正：防止關不掉 ---
-    let recognition;
+    // --- 加強型語音修復機制：徹底重置麥克風驅動 ---
+    let recognition = null;
     let isRecording = false;
-    let isThrottled = false; // 冷卻鎖
+    let isProcessing = false;
 
     function initSpeech() {
+        // 先釋放舊的辨識物件
+        if (recognition) {
+            recognition.abort();
+            recognition = null;
+        }
+
         const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
         if (!SpeechRecognition) return;
+
         recognition = new SpeechRecognition();
-        recognition.lang = 'zh-TW'; recognition.continuous = true; recognition.interimResults = true; 
+        recognition.lang = 'zh-TW';
+        recognition.continuous = true;
+        recognition.interimResults = true;
         
         recognition.onstart = () => { 
-            isRecording = true; 
+            isRecording = true;
+            isProcessing = false;
             document.getElementById('voicePanel').classList.add('recording'); 
             document.getElementById('voiceText').innerText = "辨識中..."; 
         };
+
         recognition.onresult = (e) => {
             let interimTranscript = '';
-            for (let i = e.resultIndex; i < e.results.length; ++i) { interimTranscript += e.results[i][0].transcript; }
+            for (let i = e.resultIndex; i < e.results.length; ++i) { 
+                interimTranscript += e.results[i][0].transcript; 
+            }
             document.getElementById('voiceText').innerText = interimTranscript;
         };
+
         recognition.onend = () => { 
-            isRecording = false; 
+            isRecording = false;
+            isProcessing = false;
             document.getElementById('voicePanel').classList.remove('recording'); 
             if(document.getElementById('voiceText').innerText === "辨識中...") {
                 document.getElementById('voiceText').innerText = "點擊語音輸入..."; 
             }
+            // 關鍵點：結束時徹底銷毀物件，確保下次能正常啟動
+            recognition = null;
         };
-        recognition.onerror = () => { 
-            isRecording = false; 
+
+        recognition.onerror = (e) => { 
+            console.error("Speech error:", e.error);
+            isRecording = false;
+            isProcessing = false;
             document.getElementById('voicePanel').classList.remove('recording'); 
+            recognition = null;
         };
     }
 
     function toggleSpeech() {
-        if (isThrottled) return; // 處於冷卻期，不執行
-        if (!recognition) return alert("您的瀏覽器不支援語音輸入");
+        if (isProcessing) return; // 防止重複點擊連發
+        isProcessing = true;
 
-        isThrottled = true; 
-        setTimeout(() => { isThrottled = false; }, 500); // 鎖定 0.5 秒防止連點
-
-        if (isRecording) {
-            // 強制關閉邏輯
-            recognition.stop();
+        if (isRecording && recognition) {
+            // 執行「結束」：強制銷毀
+            recognition.abort(); 
+            // 立即回饋視覺，不等待 onend
             isRecording = false;
             document.getElementById('voicePanel').classList.remove('recording');
             document.getElementById('voiceText').innerText = "點擊語音輸入...";
+            setTimeout(() => { isProcessing = false; }, 300);
         } else {
+            // 執行「開始」：全新初始化
+            initSpeech();
+            if (!recognition) {
+                isProcessing = false;
+                return alert("您的瀏覽器不支援語音輸入");
+            }
             try {
                 recognition.start();
+                setTimeout(() => { isProcessing = false; }, 300);
             } catch(e) {
-                recognition.stop();
-                setTimeout(() => recognition.start(), 200);
+                console.error(e);
+                isProcessing = false;
             }
         }
     }
@@ -254,8 +280,7 @@
         const end = (e) => {
             if (isDragging) {
                 const duration = Date.now() - startTime;
-                // 若沒有明顯移動且點擊時間短，視為「開關辨識」
-                if (!moved && duration < 300) {
+                if (!moved && duration < 350) {
                     toggleSpeech();
                 }
             }
@@ -267,19 +292,17 @@
         window.addEventListener('mouseup', end); window.addEventListener('touchend', end);
     }
 
-    // --- 其餘戰術板核心功能保留 ---
+    // --- 其餘功能均完整保留 ---
     function showToast(msg) {
         const toast = document.getElementById('toast');
         toast.innerText = msg; toast.style.opacity = '1';
         setTimeout(() => { toast.style.opacity = '0'; }, 2000);
     }
-
     function record() {
         frames.push({ players: JSON.parse(JSON.stringify(players)), ball: JSON.parse(JSON.stringify(ball)), slots: JSON.parse(JSON.stringify(slots)), drawing: dCanvas.toDataURL() });
         document.getElementById('fCount').innerText = frames.length;
         clearDrawing(); showToast(`已紀錄第 ${frames.length} 格影格`);
     }
-
     async function init() {
         try {
             courtImg = await loadImage("https://raw.githubusercontent.com/goodskyfly-cell/BBOARD/main/basketball%20court%202%20(NEW).png");
@@ -287,21 +310,18 @@
             playerImages = await Promise.all(names.map(n => loadImage(`https://raw.githubusercontent.com/goodskyfly-cell/newboard/main/${n}`)));
             window.addEventListener('resize', resize);
             resize(); resetItems(); setupEvents(); await fetchCloudData();
-            initSpeech(); setupVoicePanel();
+            setupVoicePanel();
         } catch (e) { console.error(e); }
     }
-
     function loadImage(src) { return new Promise((res) => { const img = new Image(); img.crossOrigin = "anonymous"; img.src = src; img.onload = () => res(img); }); }
     function resize() { const holder = document.getElementById('canvasHolder'); const ratio = BASE_W / BASE_H; let w = holder.clientWidth, h = holder.clientHeight; if (w / h > ratio) w = h * ratio; else h = w / ratio; canvas.width = dCanvas.width = w; canvas.height = dCanvas.height = h; render(); }
     function resetItems() { players = []; for (let i = 0; i < 12; i++) players.push({ x: 80 + (i % 6) * 110, y: i < 6 ? 90 : 200, imgIndex: i, bindSlot: null }); slots = [ {x: 300, y: 480, id: 0}, {x: 400, y: 480, id: 1}, {x: 500, y: 480, id: 2}, {x: 600, y: 480, id: 3}, {x: 700, y: 480, id: 4} ]; ball = {x: 500, y: 286}; render(); }
-    
     function render() {
         if (!courtImg) return; ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.drawImage(courtImg, 0, 0, canvas.width, canvas.height); const s = canvas.width / BASE_W;
         if (currentMode === 'advanced' || isPlaying) { slots.forEach(sl => { ctx.beginPath(); ctx.arc(sl.x * s, sl.y * s, 30 * s, 0, Math.PI * 2); ctx.strokeStyle = "rgba(49, 130, 206, 0.8)"; ctx.setLineDash([5, 5]); ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = "rgba(49, 130, 206, 0.15)"; ctx.fill(); }); }
         players.forEach(p => { const r = 25.5 * s; ctx.save(); ctx.beginPath(); ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2); ctx.clip(); if (playerImages[p.imgIndex]) ctx.drawImage(playerImages[p.imgIndex], (p.x-25.5)*s, (p.y-25.5)*s, 51*s, 51*s); ctx.restore(); ctx.beginPath(); ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2); ctx.strokeStyle = (p.bindSlot !== null && currentMode === 'advanced') ? "#38a169" : "white"; ctx.lineWidth = 2.5; ctx.stroke(); });
         const br = 18 * s; ctx.beginPath(); ctx.arc(ball.x * s, ball.y * s, br, 0, Math.PI * 2); ctx.fillStyle = "#ff5722"; ctx.fill(); ctx.strokeStyle = "white"; ctx.lineWidth = 2; ctx.stroke();
     }
-
     function setupEvents() {
         let target = null;
         const getXY = (e) => { const rect = canvas.getBoundingClientRect(); const cx = e.touches ? e.touches[0].clientX : e.clientX; const cy = e.touches ? e.touches[0].clientY : e.clientY; const s = canvas.width / BASE_W; return { x: (cx - rect.left) / s, y: (cy - rect.top) / s }; };
@@ -310,7 +330,6 @@
         const end = () => { target = null; isDrawing = false; };
         const el = document.getElementById('canvasHolder'); el.addEventListener('mousedown', start); window.addEventListener('mousemove', move); window.addEventListener('mouseup', end); el.addEventListener('touchstart', start, {passive:false}); window.addEventListener('touchmove', move, {passive:false}); window.addEventListener('touchend', end);
     }
-
     function animate() {
         if (!isPlaying || isPaused || isWaiting) return; const cur = frames[currentFrameIdx], nxt = frames[currentFrameIdx + 1]; if (t > 0) clearDrawing(); else if (t === 0 && cur.drawing) drawSavedLine(cur.drawing);
         if (nxt) {
@@ -320,7 +339,6 @@
             if (t >= 1) { t = 0; currentFrameIdx++; isWaiting = true; if (frames[currentFrameIdx] && frames[currentFrameIdx].drawing) drawSavedLine(frames[currentFrameIdx].drawing); setTimeout(() => { isWaiting = false; animate(); }, pauseTime); } else { requestAnimationFrame(animate); }
         } else { isPlaying = false; }
     }
-
     function startPlay() { if (frames.length < 2) return alert("請先記錄影格！"); isPlaying = true; isPaused = false; currentFrameIdx = 0; t = 0; document.getElementById('playBarWrapper').classList.add('active'); animate(); }
     function stopAnim() { isPlaying = false; document.getElementById('playBarWrapper').classList.remove('active'); resetItems(); clearDrawing(); }
     function pauseAnim() { isPaused = !isPaused; if (!isPaused && isPlaying) animate(); }
@@ -334,7 +352,6 @@
     function clearFrames() { frames = []; document.getElementById('fCount').innerText = "0"; stopAnim(); }
     function toggleFullScreen() { if (!document.fullscreenElement) document.documentElement.requestFullscreen(); else document.exitFullscreen(); }
     function switchMode(m) { currentMode = m; document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active')); document.getElementById(m === 'basic' ? 'tab-basic' : 'tab-advanced').classList.add('active'); resetItems(); }
-    
     async function fetchCloudData() { const s = document.getElementById('sync-status'); s.innerText = "⏳ 同步中..."; try { const res = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, { headers: { 'X-Master-Key': MASTER_KEY } }); const result = await res.json(); savedTactics = result.record.tactics || []; updateTacticList(); s.innerText = "✅ 已同步"; } catch (e) { s.innerText = "❌ 失敗"; } }
     function updateTacticList() { const list = document.getElementById('tacticList'); list.innerHTML = ""; savedTactics.forEach((t, i) => { const item = document.createElement('div'); item.className = 'tactic-item'; item.innerHTML = `<span class="tactic-name">${t.name}</span><div class="tactic-btns"><button class="panel-btn btn-blue" style="padding:4px; width:45px;" onclick="loadTactic(${i})">載入</button><button class="panel-btn btn-red" style="padding:4px; width:45px;" onclick="deleteTactic(${i})">刪除</button></div>`; list.appendChild(item); }); }
     function loadTactic(idx) { const t_data = savedTactics[idx].data; frames = JSON.parse(JSON.stringify(t_data)); document.getElementById('fCount').innerText = frames.length; players = JSON.parse(JSON.stringify(frames[0].players)); ball = JSON.parse(JSON.stringify(frames[0].ball)); slots = JSON.parse(JSON.stringify(frames[0].slots)); currentFrameIdx = 0; t = 0; clearDrawing(); render(); }
