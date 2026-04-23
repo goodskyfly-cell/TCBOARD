@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>籃球戰術板 Pro - 球員拖曳進場版</title>
+    <title>籃球戰術板 Pro - 專業模式移動修正版</title>
     <style>
         :root { 
             --panel: rgba(25, 25, 25, 0.98); 
@@ -69,7 +69,6 @@
         .left-tab { right: -42px; background: var(--accent-blue); border-radius: 0 10px 10px 0; }
         .right-tab { left: -42px; background: var(--accent-green); border-radius: 10px 0 0 10px; }
         
-        /* 球員收納區樣式 */
         .player-pool {
             display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
             background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; margin-bottom: 10px;
@@ -148,8 +147,7 @@
             <hr style="border:0; border-top:1px solid var(--border); margin: 5px 0;">
             
             <div style="font-size: 14px; margin-bottom: 5px; color: #a0aec0; text-align: center;">—— 拖曳球員進場 ——</div>
-            <div class="player-pool" id="playerPool">
-                </div>
+            <div class="player-pool" id="playerPool"></div>
 
             <button class="panel-btn btn-green" onclick="record()">📌 紀錄目前影格 (第<span id="fCount">0</span>格)</button>
             <button class="panel-btn btn-orange" onclick="saveToLibrary()">☁️ 儲存至雲端</button>
@@ -188,7 +186,7 @@
     let currentMode = 'basic', lineStyle = 'solid', moveSpeed = 0.05, pauseTime = 500;
     let savedTactics = [];
 
-    // --- 語音模組與硬體修正保留 ---
+    // --- 語音模組 ---
     let recognition = null, isRecording = false, hardwareLock = false, audioContext = null, audioStream = null;
 
     async function initSpeech() {
@@ -200,7 +198,7 @@
             const source = audioContext.createMediaStreamSource(audioStream);
             const processor = audioContext.createAnalyser(); 
             source.connect(processor);
-        } catch (e) { alert("偵測到麥克風但無法獲取訊號。"); return; }
+        } catch (e) { return; }
         const SpeechRecognition = window.webkitSpeechRecognition || window.SpeechRecognition;
         if (!SpeechRecognition) return;
         recognition = new SpeechRecognition();
@@ -227,14 +225,13 @@
         else { await initSpeech(); if (!recognition) return; try { recognition.start(); } catch(e) { forceResetVoiceUI(); } }
     }
 
-    // --- 畫布與戰術核心功能修正 ---
+    // --- 核心邏輯 ---
     async function init() {
         try {
             courtImg = await loadImage("https://raw.githubusercontent.com/goodskyfly-cell/BBOARD/main/basketball%20court%202%20(NEW).png");
             const names = ["01.png", "05.png", "06.png", "07.png", "08.png", "09.png", "10.png", "12.png", "13.png", "15.png", "23.png", "89.png"];
             playerImages = await Promise.all(names.map(n => loadImage(`https://raw.githubusercontent.com/goodskyfly-cell/newboard/main/${n}`)));
             
-            // 初始化面板球員
             const pool = document.getElementById('playerPool');
             playerImages.forEach((img, idx) => {
                 const div = document.createElement('div');
@@ -249,16 +246,9 @@
     }
 
     function resetItems() {
-        // 球員初始位置設在畫布右側外（即在面板內，但畫布不顯示）
         players = [];
         for (let i = 0; i < 12; i++) {
-            players.push({ 
-                x: 1100, // 初始在畫布外
-                y: 100 + i * 40, 
-                imgIndex: i, 
-                bindSlot: null,
-                inPlay: false // 標記是否在場上
-            });
+            players.push({ x: 1100, y: 100 + i * 40, imgIndex: i, bindSlot: null });
         }
         slots = [ {x: 300, y: 480, id: 0}, {x: 400, y: 480, id: 1}, {x: 500, y: 480, id: 2}, {x: 600, y: 480, id: 3}, {x: 700, y: 480, id: 4} ];
         ball = {x: 500, y: 286};
@@ -272,7 +262,6 @@
                 ctx.beginPath(); ctx.arc(sl.x * s, sl.y * s, 30 * s, 0, Math.PI * 2); ctx.strokeStyle = "rgba(49, 130, 206, 0.8)"; ctx.setLineDash([5, 5]); ctx.lineWidth = 3; ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = "rgba(49, 130, 206, 0.15)"; ctx.fill(); 
             }); 
         }
-        // 只繪製在畫布範圍內的球員
         players.forEach(p => {
             if (p.x <= BASE_W && p.x >= 0) {
                 const r = 25.5 * s; ctx.save(); ctx.beginPath(); ctx.arc(p.x * s, p.y * s, r, 0, Math.PI * 2); ctx.clip();
@@ -298,17 +287,20 @@
             const pos = getXY(e);
             if (isDrawingMode) { dCtx.beginPath(); dCtx.moveTo(pos.x * (canvas.width/BASE_W), pos.y * (canvas.width/BASE_W)); dCtx.setLineDash(lineStyle === 'dashed' ? [10, 10] : []); dCtx.strokeStyle = "black"; dCtx.lineWidth = 4; isDrawing = true; return; }
             
-            // 優先檢查場上現有的球員
-            target = [ball, ...players].reverse().find(it => Math.hypot(it.x - pos.x, it.y - pos.y) < 30);
+            // 優先順序修正：專業模式下藍色圓圈應可被選取移動
+            const clickable = [];
+            if (currentMode === 'advanced') clickable.push(...slots);
+            clickable.push(ball, ...players);
+
+            target = clickable.reverse().find(it => Math.hypot(it.x - pos.x, it.y - pos.y) < 35);
             
-            // 如果沒點到場上的，檢查是否點到右側面板的球員 (透過 DOM 元素偵測)
             if (!target) {
                 const elAtPos = document.elementFromPoint(pos.rawX, pos.rawY);
                 const poolItem = elAtPos?.closest('.player-pool-item');
                 if (poolItem) {
                     const idx = Array.from(poolItem.parentNode.children).indexOf(poolItem);
                     target = players[idx];
-                    target.x = pos.x; target.y = pos.y; // 將球員瞬間移動到手指點擊位置
+                    target.x = pos.x; target.y = pos.y;
                 }
             }
         };
@@ -320,6 +312,7 @@
             if (isDrawingMode) { dCtx.lineTo(pos.x * (canvas.width/BASE_W), pos.y * (canvas.width/BASE_W)); dCtx.stroke(); } 
             else {
                 target.x = pos.x; target.y = pos.y;
+                // 球員自動吸附邏輯
                 if (currentMode === 'advanced' && players.includes(target)) {
                     const near = slots.find(sl => Math.hypot(sl.x - pos.x, sl.y - pos.y) < 35);
                     if(near) { target.bindSlot = near.id; target.x = near.x; target.y = near.y; } else { target.bindSlot = null; }
@@ -330,10 +323,7 @@
 
         const end = (e) => {
             if (target && players.includes(target)) {
-                // 如果球員被拖出畫布右側（大於 BASE_W），則視為歸位
-                if (target.x > BASE_W - 20) {
-                    target.x = 1100; target.bindSlot = null;
-                }
+                if (target.x > BASE_W - 20) { target.x = 1100; target.bindSlot = null; }
             }
             target = null; isDrawing = false; render();
         };
@@ -343,7 +333,7 @@
         el.addEventListener('touchstart', start, {passive:false}); window.addEventListener('touchmove', move, {passive:false}); window.addEventListener('touchend', end);
     }
 
-    // --- 其餘共用功能保留 ---
+    // --- 其餘功能均保留 ---
     function setupVoicePanel() {
         const panel = document.getElementById('voicePanel');
         let startX = 0, startY = 0, offsetX = 0, offsetY = 0, startTime = 0, isDragging = false, moved = false;
